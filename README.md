@@ -2,7 +2,7 @@
 
 Multi-step research agent that writes **claims + sources** into a Notion database, then runs an **adversarial fact-check** pass to set confidence and flag contradictions. Every assertion has a provenance trail.
 
-- **Stack:** Python, OpenRouter (LLM), Notion API, DuckDuckGo search
+- **Stack:** Python, OpenRouter (LLM), Notion API, ddgs (web search, no API key)
 - **No frontend:** Notion is the UI; run via CLI.
 
 ## Setup
