@@ -2,7 +2,7 @@
 
 Multi-step research agent that writes **claims + sources** into a Notion database, then runs an **adversarial fact-check** pass to set confidence and flag contradictions. Every assertion has a provenance trail.
 
-- **Stack:** Python, OpenRouter (LLM), Notion API, ddgs (web search, no API key)
+- **Stack:** Python, OpenRouter (LLM), Notion API, Tavily (search)
 - **No frontend:** Notion is the UI; run via CLI.
 
 ## Setup
@@ -15,13 +15,16 @@ Multi-step research agent that writes **claims + sources** into a Notion databas
 2. **OpenRouter**
    - Get an API key at [OpenRouter](https://openrouter.ai/keys).
 
-3. **Env**
+3. **Tavily**
+   - Get an API key at [Tavily](https://tavily.com) for web search.
+
+4. **Env**
    ```bash
    cp .env.example .env
-   # Edit .env: NOTION_TOKEN, NOTION_PAGE_ID (or NOTION_DATABASE_ID), OPENROUTER_API_KEY
+   # Edit .env: NOTION_TOKEN, NOTION_PAGE_ID (or NOTION_DATABASE_ID), OPENROUTER_API_KEY, TAVILY_API_KEY
    ```
 
-4. **Install**
+5. **Install**
    ```bash
    pip install -r requirements.txt
    ```
@@ -62,3 +65,4 @@ If you don’t set `NOTION_DATABASE_ID`, the script creates a database under `NO
 2. **Fact-check:** For each claim, search for counter-evidence → LLM scores confidence and contradiction → row is updated with Confidence, Contradiction, and Fact-check notes.
 
 The “living document” is the Notion database (and any views/pages you build on top of it).
+

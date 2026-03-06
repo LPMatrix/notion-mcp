@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from config import NOTION_TOKEN, OPENROUTER_API_KEY
+from config import NOTION_TOKEN, OPENROUTER_API_KEY, TAVILY_API_KEY
 
 from notion_db import NotionClaimsDB
 from research import run_research
@@ -56,9 +56,13 @@ def main() -> None:
     if not NOTION_TOKEN:
         print("Error: NOTION_TOKEN is not set. Copy .env.example to .env and add your Notion integration token.", file=sys.stderr)
         sys.exit(1)
-    if not OPENROUTER_API_KEY and (not args.fact_check_only):
-        print("Error: OPENROUTER_API_KEY is not set for research/fact-check. Add it to .env", file=sys.stderr)
-        sys.exit(1)
+    if not args.fact_check_only:
+        if not OPENROUTER_API_KEY:
+            print("Error: OPENROUTER_API_KEY is not set for research/fact-check. Add it to .env", file=sys.stderr)
+            sys.exit(1)
+        if not TAVILY_API_KEY:
+            print("Error: TAVILY_API_KEY is not set. Get a key at https://tavily.com and add it to .env", file=sys.stderr)
+            sys.exit(1)
 
     db = NotionClaimsDB()
 
