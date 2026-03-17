@@ -1,39 +1,58 @@
 #!/usr/bin/env python3
 """
-Research pipeline: multi-step research → Notion DB → adversarial fact-check.
-Every assertion gets a provenance trail (source + confidence + contradiction flag).
+Research pipeline: multi-step research → JSON output → sync to Notion via MCP.
+Every assertion gets a provenance trail (source + confidence + contradiction).
+Notion is updated using Notion MCP (e.g. in Cursor), not the REST API.
 
 Usage:
-  python main.py "Your research topic"
-  python main.py "Topic" --research-only
-  python main.py "Topic" --fact-check-only
+  python main.py "Your research topic" [--output path.json]
+  python main.py "Topic" --research-only [--output path.json]
+  python main.py --fact-check-from path.json [--output path.json]
+
+Then in Cursor (with Notion MCP connected): ask the agent to create the database
+and pages from the output JSON using notion-create-database and notion-create-pages.
 """
 from __future__ import annotations
 
 import argparse
+import re
 import sys
+from pathlib import Path
 
-from config import NOTION_TOKEN, OPENROUTER_API_KEY, TAVILY_API_KEY
+from config import OPENROUTER_API_KEY, TAVILY_API_KEY
 
-from notion_db import NotionClaimsDB
 from research import run_research
 from fact_check import run_fact_check
+from claims_store import write_claims_json, read_claims_json
+
+
+def slug(topic: str) -> str:
+    """Safe filename slug from topic."""
+    s = re.sub(r"[^\w\s-]", "", topic.lower())
+    return re.sub(r"[-\s]+", "-", s).strip() or "research"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Research pipeline: research topic → Notion claims DB → adversarial fact-check."
+        description="Research pipeline: research topic → JSON → sync to Notion via MCP."
     )
-    parser.add_argument("topic", help="Research topic to investigate")
+    parser.add_argument("topic", nargs="?", help="Research topic to investigate")
     parser.add_argument(
         "--research-only",
         action="store_true",
-        help="Only run research phase (search + extract claims → Notion)",
+        help="Only run research phase (no fact-check); write claims with Unverified confidence.",
     )
     parser.add_argument(
-        "--fact-check-only",
-        action="store_true",
-        help="Only run fact-check phase on existing claims for this topic",
+        "--fact-check-from",
+        metavar="JSON",
+        help="Re-run fact-check on claims from this JSON file; write updated JSON to --output.",
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        metavar="PATH",
+        default=None,
+        help="Output JSON path (default: research_claims_<topic_slug>.json or stdout if --fact-check-from).",
     )
     parser.add_argument(
         "--max-search",
@@ -48,44 +67,63 @@ def main() -> None:
         help="Max counter-evidence results per claim (default: 5)",
     )
     args = parser.parse_args()
-    topic = args.topic.strip()
-    if not topic:
-        print("Error: topic cannot be empty", file=sys.stderr)
-        sys.exit(1)
 
-    if not NOTION_TOKEN:
-        print("Error: NOTION_TOKEN is not set. Copy .env.example to .env and add your Notion integration token.", file=sys.stderr)
-        sys.exit(1)
-    if not args.fact_check_only:
-        if not OPENROUTER_API_KEY:
-            print("Error: OPENROUTER_API_KEY is not set for research/fact-check. Add it to .env", file=sys.stderr)
+    if args.fact_check_from:
+        if not args.output:
+            args.output = "research_claims_updated.json"
+        in_path = Path(args.fact_check_from)
+        if not in_path.is_file():
+            print(f"Error: File not found: {in_path}", file=sys.stderr)
             sys.exit(1)
-        if not TAVILY_API_KEY:
-            print("Error: TAVILY_API_KEY is not set. Get a key at https://tavily.com and add it to .env", file=sys.stderr)
+        topic, claims = read_claims_json(in_path)
+        if not claims:
+            print("No claims in file.", file=sys.stderr)
             sys.exit(1)
-
-    db = NotionClaimsDB()
-
-    if args.fact_check_only:
-        print(f"Fact-checking existing claims for topic: {topic}")
-        updated = run_fact_check(topic, db=db, max_counter_results=args.max_counter)
-        print(f"Updated {len(updated)} claim(s).")
+        print(f"Fact-checking {len(claims)} claim(s) from {in_path} ...")
+        updated = run_fact_check(claims, max_counter_results=args.max_counter)
+        out_path = Path(args.output) if args.output else None
+        if out_path:
+            write_claims_json(updated, out_path, topic=topic)
+            print(f"Wrote {len(updated)} claim(s) to {out_path}")
+        else:
+            import json
+            print(json.dumps({"topic": topic, "claims": updated}, indent=2))
         return
+
+    if not args.topic or not args.topic.strip():
+        print("Error: topic is required (or use --fact-check-from JSON).", file=sys.stderr)
+        sys.exit(1)
+    topic = args.topic.strip()
+
+    if not TAVILY_API_KEY:
+        print("Error: TAVILY_API_KEY is not set. Get a key at https://tavily.com and add it to .env", file=sys.stderr)
+        sys.exit(1)
+    if not OPENROUTER_API_KEY:
+        print("Error: OPENROUTER_API_KEY is not set. Add it to .env", file=sys.stderr)
+        sys.exit(1)
+
+    default_output = f"research_claims_{slug(topic)}.json"
+    out_path = Path(args.output) if args.output else Path(default_output)
 
     if args.research_only:
         print(f"Running research only for topic: {topic}")
-        created = run_research(topic, db=db, max_search_results=args.max_search)
-        print(f"Inserted {len(created)} claim(s) into Notion.")
+        claims = run_research(topic, max_search_results=args.max_search)
+        write_claims_json(claims, out_path, topic=topic)
+        print(f"Wrote {len(claims)} claim(s) to {out_path}")
+        print("\nTo add these to Notion: use Notion MCP in Cursor and ask to create a database and pages from this file.")
         return
 
     print(f"Running full pipeline for topic: {topic}")
-    created = run_research(topic, db=db, max_search_results=args.max_search)
-    print(f"Inserted {len(created)} claim(s).")
-    if not created:
+    claims = run_research(topic, max_search_results=args.max_search)
+    if not claims:
         print("No claims to fact-check.")
+        write_claims_json(claims, out_path, topic=topic)
+        print(f"Wrote {out_path}")
         return
-    updated = run_fact_check(topic, db=db, max_counter_results=args.max_counter)
-    print(f"Fact-checked {len(updated)} claim(s). Done.")
+    updated = run_fact_check(claims, max_counter_results=args.max_counter)
+    write_claims_json(updated, out_path, topic=topic)
+    print(f"Wrote {len(updated)} claim(s) to {out_path}")
+    print("\nTo sync to Notion: use Notion MCP in Cursor and ask to create a database and pages from this file.")
 
 
 if __name__ == "__main__":

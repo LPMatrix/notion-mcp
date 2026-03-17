@@ -1,44 +1,39 @@
-"""Adversarial fact-check phase: for each claim, search counter-evidence, assess, update Notion."""
+"""Adversarial fact-check phase: for each claim, search counter-evidence, assess. Returns enriched claim dicts."""
 from __future__ import annotations
 
-from notion_db import NotionClaimsDB, get_claim_text, get_source_url
 from search import search_counter_evidence
 from llm import fact_check_claim
+from claims_store import claim_row
 
 
-def run_fact_check(topic: str, db: NotionClaimsDB | None = None, max_counter_results: int = 5) -> list[dict]:
+def run_fact_check(claims: list[dict], max_counter_results: int = 5) -> list[dict]:
     """
-    For each claim in Notion for this topic:
+    For each claim dict (claim, source_url, source_snippet, topic, ...):
     1. Search for counter-evidence
     2. Run adversarial fact-check via OpenRouter
-    3. Update the row with confidence, contradiction flag, and notes
-    Returns the list of updated Notion pages.
+    3. Return same list with confidence, contradiction, fact_check_notes set.
     """
-    if db is None:
-        db = NotionClaimsDB()
-    db.get_database_id()
-
-    rows = db.get_claims_for_topic(topic)
-    updated = []
-    for page in rows:
-        page_id = page["id"]
-        claim = get_claim_text(page)
-        source_url = get_source_url(page)
-        props = page.get("properties", {})
-        snippet_prop = props.get("Source Snippet", {}).get("rich_text", [])
-        source_snippet = (snippet_prop[0].get("plain_text") or "").strip() if snippet_prop else ""
-
+    out = []
+    for c in claims:
+        claim = (c.get("claim") or "").strip()
         if not claim:
+            out.append(c)
             continue
-
+        source_url = (c.get("source_url") or "").strip()
+        source_snippet = (c.get("source_snippet") or "").strip()
+        topic = (c.get("topic") or "").strip()
         counter_results = search_counter_evidence(claim, max_results=max_counter_results)
         result = fact_check_claim(claim, source_url, source_snippet, counter_results)
-
-        db.update_claim_fact_check(
-            page_id=page_id,
-            confidence=result["confidence"],
-            contradiction=result["contradiction"],
-            fact_check_notes=result["fact_check_notes"],
+        out.append(
+            claim_row(
+                claim=claim,
+                source_url=source_url,
+                source_snippet=source_snippet,
+                topic=topic,
+                confidence=result["confidence"],
+                contradiction=result["contradiction"],
+                fact_check_notes=result["fact_check_notes"],
+                page_id=c.get("page_id"),
+            )
         )
-        updated.append(page)
-    return updated
+    return out
