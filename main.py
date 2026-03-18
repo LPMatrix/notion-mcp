@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Research pipeline: multi-step research → JSON output → sync to Notion via MCP.
+Research pipeline: multi-step research → JSON output → sync to Notion via sync_to_notion.py.
 Every assertion gets a provenance trail (source + confidence + contradiction).
-Notion is updated using Notion MCP (e.g. in Cursor), not the REST API.
+Sync: run sync_to_notion.py <output.json> (uses Python MCP client → Notion hosted MCP).
 
 Usage:
   python main.py "Your research topic" [--output path.json]
   python main.py "Topic" --research-only [--output path.json]
   python main.py --fact-check-from path.json [--output path.json]
-
-Then in Cursor (with Notion MCP connected): ask the agent to create the database
-and pages from the output JSON using notion-create-database and notion-create-pages.
 """
 from __future__ import annotations
 
@@ -110,7 +107,7 @@ def main() -> None:
         claims = run_research(topic, max_search_results=args.max_search)
         write_claims_json(claims, out_path, topic=topic)
         print(f"Wrote {len(claims)} claim(s) to {out_path}")
-        print("\nTo add these to Notion: use Notion MCP in Cursor and ask to create a database and pages from this file.")
+        print("\nTo sync to Notion: python sync_to_notion.py", out_path.name)
         return
 
     print(f"Running full pipeline for topic: {topic}")
@@ -123,7 +120,7 @@ def main() -> None:
     updated = run_fact_check(claims, max_counter_results=args.max_counter)
     write_claims_json(updated, out_path, topic=topic)
     print(f"Wrote {len(updated)} claim(s) to {out_path}")
-    print("\nTo sync to Notion: use Notion MCP in Cursor and ask to create a database and pages from this file.")
+    print("\nTo sync to Notion: python sync_to_notion.py", out_path.name)
 
 
 if __name__ == "__main__":
