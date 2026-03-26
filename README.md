@@ -29,22 +29,31 @@ Multi-step research agent that produces **claims + sources + fact-check** as JSO
 ### 1. Run the pipeline (writes JSON)
 
 ```bash
-# Full pipeline: research → fact-check → write JSON
+# Full pipeline: research → fact-check → write research_claims_<topic_slug>.json
 python main.py "Effects of caffeine on sleep quality"
 
-# Custom output path
-python main.py "Your topic" -o my_claims.json
-
-# Research only (no fact-check; confidence stays Unverified)
-python main.py "Your topic" --research-only
-
-# Re-run fact-check on an existing JSON file
-python main.py --fact-check-from research_claims_my-topic.json -o updated.json
+# Re-run fact-check on an existing JSON file (writes research_claims_updated.json)
+python main.py --fact-check-from research_claims_my-topic.json
 ```
 
-Output is written to `research_claims_<topic_slug>.json` (or `-o` path). Each claim has: `claim`, `source_url`, `source_snippet`, `topic`, `confidence`, `contradiction`, `fact_check_notes`.
+Output paths are fixed: `research_claims_<topic_slug>.json` for a new topic run, or `research_claims_updated.json` for `--fact-check-from`. Each claim has: `claim`, `source_url`, `source_snippet`, `topic`, `confidence`, `contradiction`, `fact_check_notes`.
 
-### 2. Sync to Notion
+### 2. Research report (Markdown + Notion page)
+
+With `--report`, the pipeline writes `research_report_<slug>.md` **and** publishes the same content as a **child page** under `NOTION_PARENT_PAGE_ID`. Requires `OPENROUTER_API_KEY` plus the same Notion MCP credentials as sync (`NOTION_MCP_ACCESS_TOKEN`, etc.).
+
+```bash
+# After the pipeline writes JSON: Markdown file + Notion page
+python main.py "Your topic" --report
+
+# From an existing claims file (no new research)
+python write_report.py research_claims_my-topic.json
+python write_report.py research_claims_my-topic.json --title "My report title"
+```
+
+The Notion page body uses **Notion Markdown**; title defaults to `Research report: <topic>` (`--report-title` on `main.py`, `--title` on `write_report.py`).
+
+### 3. Sync to Notion
 
 The `sync_to_notion.py` script uses the **Python MCP SDK** and connects to Notion’s hosted MCP at `https://mcp.notion.com/mcp` (Streamable HTTP). No Node or REST API required.
 
@@ -72,10 +81,10 @@ Notes:
 - `sync_to_notion.py` will also attempt refresh automatically if access token is missing but refresh credentials exist.
 - To disable auto OAuth bootstrap in sync: `python sync_to_notion.py ... --no-auto-auth`
 
-### 3. Optional: fact-check existing Notion data
+### 4. Optional: fact-check existing Notion data
 
 - Export or fetch the claim pages from Notion into a JSON file in the same shape (`topic` + `claims` with `claim`, `source_url`, `source_snippet`, `topic`).
-- Run: `python main.py --fact-check-from that_file.json -o updated.json`
+- Run: `python main.py --fact-check-from that_file.json` (writes `research_claims_updated.json`).
 - Re-run `sync_to_notion.py` with the updated JSON to create a new database with the revised claims, or update pages in Notion by other means.
 
 ## Notion database schema
@@ -97,6 +106,7 @@ The sync script creates a database with these properties (they match the JSON):
 1. **Research:** Search (Tavily) → LLM extracts claims with source URL + snippet → list of claim dicts.
 2. **Fact-check:** For each claim, search counter-evidence → LLM sets confidence, contradiction, notes → enriched claim dicts.
 3. **Output:** JSON file with `topic` and `claims`.
-4. **Sync:** Run `sync_to_notion.py` to create the database and pages in Notion from the JSON (Python MCP client → Notion hosted MCP).
+4. **Report (optional):** `main.py --report` or `write_report.py` → `research_report_<slug>.md` **and** a matching Notion page under `NOTION_PARENT_PAGE_ID`.
+5. **Sync:** Run `sync_to_notion.py` to create the database and pages in Notion from the JSON (Python MCP client → Notion hosted MCP).
 
-The “living document” is the Notion database once synced; every assertion has a provenance trail via the properties above.
+The “living document” is the Notion database once synced; every assertion has a provenance trail via the properties above. The report page is a separate narrative layer on top of the claim rows.

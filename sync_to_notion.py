@@ -320,6 +320,134 @@ def _database_schema() -> dict:
     }
 
 
+def _normalize_page_id_for_parent(raw: str) -> str:
+    """Ensure parent page_id UUID uses dashed form for MCP."""
+    s = (raw or "").strip()
+    m = re.search(
+        r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})",
+        s,
+        re.I,
+    )
+    if not m:
+        return s
+    u = m.group(1)
+    if len(u) == 32 and "-" not in u:
+        return f"{u[:8]}-{u[8:12]}-{u[12:16]}-{u[16:20]}-{u[20:]}"
+    return u
+
+
+async def publish_report_page(
+    markdown: str,
+    page_title: str,
+    *,
+    auto_auth: bool = True,
+    auth_port: int = 8765,
+    auth_timeout: int = 180,
+    auth_no_browser: bool = False,
+) -> None:
+    """
+    Create a normal (non-database) page under NOTION_PARENT_PAGE_ID with Notion Markdown body.
+    Uses notion-create-pages with parent type page_id.
+    """
+    def current_access_token() -> str:
+        return os.environ.get("NOTION_MCP_ACCESS_TOKEN", "").strip()
+
+    access_token = current_access_token()
+    if not access_token:
+        access_token = _refresh_access_token_if_possible()
+    if not access_token and auto_auth:
+        print("No Notion MCP access token found. Starting OAuth flow...")
+        run_auth(port=auth_port, timeout_s=auth_timeout, no_browser=auth_no_browser)
+        load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+        access_token = current_access_token()
+    if not access_token:
+        print(
+            "Error: Missing token. Run `python get_notion_mcp_token.py` or set NOTION_MCP_ACCESS_TOKEN in .env.",
+            file=sys.stderr,
+        )
+        raise SyncAbort()
+    if not NOTION_PARENT_PAGE_ID:
+        print(
+            "Error: Set NOTION_PARENT_PAGE_ID in .env (parent page for the report).",
+            file=sys.stderr,
+        )
+        raise SyncAbort()
+
+    parent_page_id = _normalize_page_id_for_parent(NOTION_PARENT_PAGE_ID)
+    max_attempts = 2
+    last_error: Exception | None = None
+    for attempt in range(max_attempts):
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": "notion-mcp-sync/1.0",
+        }
+        try:
+            async with httpx.AsyncClient(headers=headers, timeout=120.0) as http_client:
+                async with streamable_http_client(NOTION_MCP_URL, http_client=http_client) as (
+                    read_stream,
+                    write_stream,
+                    _,
+                ):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+                        tools_response = await session.list_tools()
+                        tool_names = [t.name for t in tools_response.tools]
+                        create_page_name = _pick_create_page_tool(tool_names)
+                        if not create_page_name:
+                            print(
+                                "Error: No create-page tool found. Available:",
+                                tool_names,
+                                file=sys.stderr,
+                            )
+                            raise SyncAbort()
+                        create_args = {
+                            "parent": {
+                                "type": "page_id",
+                                "page_id": parent_page_id,
+                            },
+                            "pages": [
+                                {
+                                    "content": markdown,
+                                    "properties": {"title": page_title},
+                                }
+                            ],
+                        }
+                        result = await session.call_tool(create_page_name, create_args)
+                        if result.isError:
+                            print(f"Error publishing report: {result}", file=sys.stderr)
+                            raise SyncAbort()
+                        print("Published report to Notion (child page under NOTION_PARENT_PAGE_ID).")
+                        return
+        except SyncAbort:
+            raise
+        except Exception as e:
+            last_error = e
+            if "401" in str(e) and attempt < max_attempts - 1:
+                refreshed = _refresh_access_token_if_possible()
+                if refreshed:
+                    print("Access token was unauthorized; refreshed token and retrying once...")
+                    access_token = refreshed
+                    continue
+                if auto_auth:
+                    print("Access token unauthorized; starting OAuth flow to get a new token...")
+                    run_auth(port=auth_port, timeout_s=auth_timeout, no_browser=auth_no_browser)
+                    load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
+                    access_token = current_access_token()
+                    if access_token:
+                        continue
+            break
+
+    if last_error and "401" in str(last_error):
+        print(
+            "Error: Notion MCP returned 401 Unauthorized. Token is invalid/expired.\n"
+            "Run `python get_notion_mcp_token.py` (or remove --no-auto-auth) and try again.",
+            file=sys.stderr,
+        )
+        raise SyncAbort()
+    if last_error:
+        raise last_error
+
+
 async def _run_sync(
     path: Path,
     create_db_only: bool,
