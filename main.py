@@ -56,6 +56,11 @@ def main() -> None:
         help="Max counter-evidence results per claim (default: 5)",
     )
     parser.add_argument(
+        "--no-expand",
+        action="store_true",
+        help="Skip LLM topic expansion; search only the raw topic string",
+    )
+    parser.add_argument(
         "--report",
         action="store_true",
         help="After writing JSON, write research_report_<slug>.md and publish the same content to Notion "
@@ -77,13 +82,19 @@ def main() -> None:
     parser.add_argument("--auth-no-browser", action="store_true")
     args = parser.parse_args()
 
-    def write_and_maybe_publish_report(topic_str: str, claims: list, json_path: Path) -> None:
+    def write_and_maybe_publish_report(
+        topic_str: str,
+        claims: list,
+        json_path: Path,
+        *,
+        topic_expansion: dict | None = None,
+    ) -> None:
         if not args.report:
             return
         if not OPENROUTER_API_KEY:
             print("Error: --report requires OPENROUTER_API_KEY in .env", file=sys.stderr)
             sys.exit(1)
-        md = generate_report_markdown(topic_str, claims)
+        md = generate_report_markdown(topic_str, claims, topic_expansion=topic_expansion)
         rp = report_output_path(json_path)
         rp.parent.mkdir(parents=True, exist_ok=True)
         rp.write_text(md, encoding="utf-8")
@@ -108,16 +119,23 @@ def main() -> None:
         if not in_path.is_file():
             print(f"Error: File not found: {in_path}", file=sys.stderr)
             sys.exit(1)
-        topic, claims = read_claims_json(in_path)
+        topic, claims, expansion = read_claims_json(in_path)
         if not claims:
             print("No claims in file.", file=sys.stderr)
             sys.exit(1)
         print(f"Fact-checking {len(claims)} claim(s) from {in_path} ...")
         updated = run_fact_check(claims, max_counter_results=args.max_counter)
         out_path = Path("research_claims_updated.json")
-        write_claims_json(updated, out_path, topic=topic)
+        write_claims_json(
+            updated,
+            out_path,
+            topic=topic,
+            topic_expansion=expansion if expansion else None,
+        )
         print(f"Wrote {len(updated)} claim(s) to {out_path}")
-        write_and_maybe_publish_report(topic, updated, out_path)
+        write_and_maybe_publish_report(
+            topic, updated, out_path, topic_expansion=expansion if expansion else None
+        )
         return
 
     if not args.topic or not args.topic.strip():
@@ -135,16 +153,25 @@ def main() -> None:
     out_path = Path(f"research_claims_{slug(topic)}.json")
 
     print(f"Running full pipeline for topic: {topic}")
-    claims = run_research(topic, max_search_results=args.max_search)
+    claims, expansion = run_research(
+        topic,
+        max_search_results=args.max_search,
+        use_topic_expansion=not args.no_expand,
+    )
+    if not args.no_expand and expansion.get("search_queries"):
+        pq = (expansion.get("primary_question") or topic).strip()
+        if len(pq) > 120:
+            pq = pq[:117] + "..."
+        print(f"Topic expansion: {len(expansion['search_queries'])} search queries — {pq}")
     if not claims:
         print("No claims to fact-check.")
-        write_claims_json(claims, out_path, topic=topic)
+        write_claims_json(claims, out_path, topic=topic, topic_expansion=expansion if expansion else None)
         print(f"Wrote {out_path}")
         return
     updated = run_fact_check(claims, max_counter_results=args.max_counter)
-    write_claims_json(updated, out_path, topic=topic)
+    write_claims_json(updated, out_path, topic=topic, topic_expansion=expansion if expansion else None)
     print(f"Wrote {len(updated)} claim(s) to {out_path}")
-    write_and_maybe_publish_report(topic, updated, out_path)
+    write_and_maybe_publish_report(topic, updated, out_path, topic_expansion=expansion if expansion else None)
     print("\nTo sync to Notion: python sync_to_notion.py", out_path.name)
 
 

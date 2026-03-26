@@ -34,9 +34,16 @@ python main.py "Effects of caffeine on sleep quality"
 
 # Re-run fact-check on an existing JSON file (writes research_claims_updated.json)
 python main.py --fact-check-from research_claims_my-topic.json
+
+# Skip LLM topic expansion (search only the exact topic string)
+python main.py "Your topic" --no-expand
 ```
 
-Output paths are fixed: `research_claims_<topic_slug>.json` for a new topic run, or `research_claims_updated.json` for `--fact-check-from`. Each claim has: `claim`, `source_url`, `source_snippet`, `topic`, `confidence`, `contradiction`, `fact_check_notes`.
+**Topic expansion (default):** Before search, an LLM turns your topic into a short brief (primary question, scope, subtopics, exclusions) and **3–6 distinct Tavily queries**. Results are merged and **deduplicated by URL**, then passed to claim extraction (which also sees the brief). This improves recall on vague topics. Use `--no-expand` to use a single search on the raw string.
+
+`--max-search` caps the **total** unique results fed into extraction after merging (default: 10).
+
+Output paths are fixed: `research_claims_<topic_slug>.json` for a new topic run, or `research_claims_updated.json` for `--fact-check-from`. The JSON may include **`topic_expansion`** (the brief + queries used). Each claim has: `claim`, `source_url`, `source_snippet`, `topic`, `confidence`, `contradiction`, `fact_check_notes`.
 
 ### 2. Research report (Markdown + Notion page)
 
@@ -103,10 +110,11 @@ The sync script creates a database with these properties (they match the JSON):
 
 ## Flow
 
-1. **Research:** Search (Tavily) → LLM extracts claims with source URL + snippet → list of claim dicts.
-2. **Fact-check:** For each claim, search counter-evidence → LLM sets confidence, contradiction, notes → enriched claim dicts.
-3. **Output:** JSON file with `topic` and `claims`.
-4. **Report (optional):** `main.py --report` or `write_report.py` → `research_report_<slug>.md` **and** a matching Notion page under `NOTION_PARENT_PAGE_ID`.
-5. **Sync:** Run `sync_to_notion.py` to create the database and pages in Notion from the JSON (Python MCP client → Notion hosted MCP).
+1. **Topic expansion (optional):** LLM produces a brief + multiple search queries; skipped with `--no-expand`.
+2. **Research:** Tavily search per query → merge + dedupe URLs → LLM extracts claims with source URL + snippet → list of claim dicts.
+3. **Fact-check:** For each claim, search counter-evidence → LLM sets confidence, contradiction, notes → enriched claim dicts.
+4. **Output:** JSON file with `topic`, optional `topic_expansion`, and `claims`.
+5. **Report (optional):** `main.py --report` or `write_report.py` → `research_report_<slug>.md` **and** a matching Notion page under `NOTION_PARENT_PAGE_ID`.
+6. **Sync:** Run `sync_to_notion.py` to create the database and pages in Notion from the JSON (Python MCP client → Notion hosted MCP).
 
 The “living document” is the Notion database once synced; every assertion has a provenance trail via the properties above. The report page is a separate narrative layer on top of the claim rows.

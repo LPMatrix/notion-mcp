@@ -61,13 +61,13 @@ def main() -> None:
         print("Error: OPENROUTER_API_KEY is not set. Add it to .env", file=sys.stderr)
         sys.exit(1)
 
-    topic, claims = read_claims_json(args.json_file)
+    topic, claims, expansion = read_claims_json(args.json_file)
     if not claims:
         print("No claims in file.", file=sys.stderr)
         sys.exit(1)
 
     print(f"Generating report for {len(claims)} claim(s) ...")
-    md = generate_report_markdown(topic, claims)
+    md = generate_report_markdown(topic, claims, topic_expansion=expansion if expansion else None)
     out = report_output_path(args.json_file)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(md, encoding="utf-8")

@@ -40,18 +40,29 @@ def claim_row(
     }
 
 
-def write_claims_json(claims: list[dict], path: str | Path, topic: str = "") -> Path:
-    """Write claims (with optional topic) to a JSON file. Returns path."""
+def write_claims_json(
+    claims: list[dict],
+    path: str | Path,
+    topic: str = "",
+    *,
+    topic_expansion: dict[str, Any] | None = None,
+) -> Path:
+    """Write claims (with optional topic and topic_expansion) to a JSON file. Returns path."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"topic": topic, "count": len(claims), "claims": claims}
+    payload: dict[str, Any] = {"topic": topic, "count": len(claims), "claims": claims}
+    if topic_expansion:
+        payload["topic_expansion"] = topic_expansion
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     return path
 
 
-def read_claims_json(path: str | Path) -> tuple[str, list[dict]]:
-    """Read topic and claims from JSON. Returns (topic, claims)."""
+def read_claims_json(path: str | Path) -> tuple[str, list[dict], dict[str, Any]]:
+    """Read topic, claims, and optional topic_expansion from JSON."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    return data.get("topic", ""), data.get("claims", [])
+    te = data.get("topic_expansion")
+    if not isinstance(te, dict):
+        te = {}
+    return data.get("topic", ""), data.get("claims", []), te

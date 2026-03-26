@@ -42,17 +42,44 @@ def _claims_for_prompt(claims: list[dict[str, Any]], max_snippet: int = 400) -> 
     return "\n".join(lines)
 
 
-def generate_report_markdown(topic: str, claims: list[dict[str, Any]]) -> str:
+def _expansion_for_prompt(topic_expansion: dict[str, Any] | None) -> str:
+    if not topic_expansion:
+        return ""
+    pq = (topic_expansion.get("primary_question") or "").strip()
+    sc = (topic_expansion.get("scope") or "").strip()
+    excl = (topic_expansion.get("exclude") or "").strip()
+    subs = topic_expansion.get("subtopics") or []
+    sq = topic_expansion.get("search_queries") or []
+    sub_lines = ", ".join(s for s in subs if isinstance(s, str) and s.strip())
+    if not pq and not sc:
+        return ""
+    return f"""
+Planned research focus (from topic expansion step):
+- Primary question: {pq or "(same as topic)"}
+- Scope: {sc or "(not specified)"}
+- Angles: {sub_lines or "(not specified)"}
+- Search queries used: {len([x for x in sq if x])} distinct queries
+- Exclusions / skepticism: {excl or "(none)"}
+"""
+
+
+def generate_report_markdown(
+    topic: str,
+    claims: list[dict[str, Any]],
+    *,
+    topic_expansion: dict[str, Any] | None = None,
+) -> str:
     """
     Produce a Markdown report: executive summary, synthesis, limitations, open questions.
     Uses the same OpenRouter client as the rest of the pipeline.
     """
     client = get_client()
     body = _claims_for_prompt(claims)
+    exp_block = _expansion_for_prompt(topic_expansion)
     prompt = f"""You are writing a research report for an informed reader. The topic and structured claim-level evidence (with fact-check notes) are below.
 
 Topic: {topic}
-
+{exp_block}
 Evidence (one section per extracted claim):
 {body}
 

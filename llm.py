@@ -27,7 +27,12 @@ def set_client(client: OpenAI) -> None:
     _openrouter_client = client
 
 
-def extract_claims(topic: str, search_results: list[dict[str, str]]) -> list[dict[str, str]]:
+def extract_claims(
+    topic: str,
+    search_results: list[dict[str, str]],
+    *,
+    topic_expansion: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
     """
     Given a research topic and search results, return a list of
     {claim, source_url, source_snippet} with one discrete assertion per item.
@@ -37,10 +42,25 @@ def extract_claims(topic: str, search_results: list[dict[str, str]]) -> list[dic
         f"[{i+1}] Title: {r.get('title', '')}\nURL: {r.get('href', '')}\nSnippet: {r.get('body', '')[:800]}"
         for i, r in enumerate(search_results)
     )
+    brief_block = ""
+    if topic_expansion:
+        pq = (topic_expansion.get("primary_question") or topic).strip()
+        sc = (topic_expansion.get("scope") or "").strip()
+        subs = topic_expansion.get("subtopics") or []
+        excl = (topic_expansion.get("exclude") or "").strip()
+        sub_lines = "\n".join(f"- {s}" for s in subs if isinstance(s, str) and s.strip())
+        brief_block = f"""
+Research brief (use this to focus claims; every claim must still cite a source below):
+- Primary question: {pq}
+- Scope: {sc or "(not specified)"}
+- Angles to cover:
+{sub_lines or "- (see primary question)"}
+- Avoid or treat skeptically: {excl or "(none specified)"}
+"""
     prompt = f"""You are a research analyst. Given the topic and the search results below, extract discrete, factual claims that are supported by a specific source.
 
 Topic: {topic}
-
+{brief_block}
 Search results:
 {results_text}
 
