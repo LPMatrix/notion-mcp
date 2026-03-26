@@ -172,7 +172,6 @@ def main() -> None:
     write_claims_json(updated, out_path, topic=topic, topic_expansion=expansion if expansion else None)
     print(f"Wrote {len(updated)} claim(s) to {out_path}")
     write_and_maybe_publish_report(topic, updated, out_path, topic_expansion=expansion if expansion else None)
-    print("\nTo sync to Notion: python sync_to_notion.py", out_path.name)
 
 
 if __name__ == "__main__":

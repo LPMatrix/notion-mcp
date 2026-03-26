@@ -49,7 +49,8 @@ def _collect_search_results(queries: list[str], max_total: int) -> list[dict[str
     merged: list[dict[str, str]] = []
     for q in queries:
         merged.extend(search(q, max_results=per))
-    return _dedupe_results(merged)[:max_total]
+    deduped = _dedupe_results(merged)[:max_total]
+    return deduped
 
 
 def _minimal_expansion(topic: str) -> dict[str, Any]:

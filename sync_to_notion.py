@@ -49,6 +49,42 @@ class SyncAbort(Exception):
     """Raised instead of sys.exit inside async paths (clean shutdown, no ExceptionGroup noise)."""
 
 
+def _exception_group_type():
+    try:
+        from exceptiongroup import ExceptionGroup as EG  # py3.10 + anyio
+        return EG
+    except ImportError:
+        pass
+    try:
+        from builtins import ExceptionGroup as EG  # py3.11+
+        return EG
+    except ImportError:
+        return None
+
+
+_ExceptionGroup = _exception_group_type()
+
+
+def _is_exception_group(exc: BaseException) -> bool:
+    """True for TaskGroup / ExceptionGroup (subclass of BaseException, not Exception)."""
+    if _ExceptionGroup is not None and isinstance(exc, _ExceptionGroup):
+        return True
+    return type(exc).__name__ == "ExceptionGroup" and hasattr(exc, "exceptions")
+
+
+def _error_text_contains_401(exc: BaseException) -> bool:
+    """Match 401 in plain errors or nested ExceptionGroup (MCP streamable HTTP)."""
+    if "401" in str(exc):
+        return True
+    subs = getattr(exc, "exceptions", None)
+    if subs is not None:
+        try:
+            return any(_error_text_contains_401(x) for x in subs)
+        except (TypeError, AttributeError):
+            return False
+    return False
+
+
 # Notion MCP tool names vary; never use update/delete tools for creation.
 _PREFERRED_CREATE_DATA_SOURCE_TOOLS = (
     "create-a-data-source",
@@ -375,7 +411,7 @@ async def publish_report_page(
 
     parent_page_id = _normalize_page_id_for_parent(NOTION_PARENT_PAGE_ID)
     max_attempts = 2
-    last_error: Exception | None = None
+    last_error: BaseException | None = None
     for attempt in range(max_attempts):
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -394,11 +430,7 @@ async def publish_report_page(
                         tool_names = [t.name for t in tools_response.tools]
                         create_page_name = _pick_create_page_tool(tool_names)
                         if not create_page_name:
-                            print(
-                                "Error: No create-page tool found. Available:",
-                                tool_names,
-                                file=sys.stderr,
-                            )
+                            print("Error: No create-page tool found. Available:", tool_names, file=sys.stderr)
                             raise SyncAbort()
                         create_args = {
                             "parent": {
@@ -420,9 +452,14 @@ async def publish_report_page(
                         return
         except SyncAbort:
             raise
-        except Exception as e:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:
+            # ExceptionGroup (anyio TaskGroup) is BaseException, not Exception — unwrap for 401 retry.
+            if not isinstance(e, Exception) and not _is_exception_group(e):
+                raise
             last_error = e
-            if "401" in str(e) and attempt < max_attempts - 1:
+            if _error_text_contains_401(e) and attempt < max_attempts - 1:
                 refreshed = _refresh_access_token_if_possible()
                 if refreshed:
                     print("Access token was unauthorized; refreshed token and retrying once...")
@@ -437,7 +474,7 @@ async def publish_report_page(
                         continue
             break
 
-    if last_error and "401" in str(last_error):
+    if last_error and _error_text_contains_401(last_error):
         print(
             "Error: Notion MCP returned 401 Unauthorized. Token is invalid/expired.\n"
             "Run `python get_notion_mcp_token.py` (or remove --no-auto-auth) and try again.",
@@ -493,7 +530,7 @@ async def _run_sync(
     # 1) attempt refresh using refresh token
     # 2) if still unauthorized and auto_auth enabled, run interactive OAuth
     max_attempts = 2
-    last_error: Exception | None = None
+    last_error: BaseException | None = None
     for attempt in range(max_attempts):
         headers = {
             "Authorization": f"Bearer {access_token}",
@@ -585,10 +622,14 @@ async def _run_sync(
                         return
         except SyncAbort:
             raise
-        except Exception as e:
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:
+            if not isinstance(e, Exception) and not _is_exception_group(e):
+                raise
             last_error = e
             # Retry only for unauthorized cases.
-            if "401" in str(e) and attempt < max_attempts - 1:
+            if _error_text_contains_401(e) and attempt < max_attempts - 1:
                 refreshed = _refresh_access_token_if_possible()
                 if refreshed:
                     print("Access token was unauthorized; refreshed token and retrying once...")
@@ -604,7 +645,7 @@ async def _run_sync(
             break
 
     # If we get here, all attempts failed.
-    if last_error and "401" in str(last_error):
+    if last_error and _error_text_contains_401(last_error):
         print(
             "Error: Notion MCP returned 401 Unauthorized. Token is invalid/expired.\n"
             "Run `python get_notion_mcp_token.py` (or remove --no-auto-auth) and try again.",
