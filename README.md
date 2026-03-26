@@ -48,16 +48,29 @@ Output is written to `research_claims_<topic_slug>.json` (or `-o` path). Each cl
 
 The `sync_to_notion.py` script uses the **Python MCP SDK** and connects to Notion’s hosted MCP at `https://mcp.notion.com/mcp` (Streamable HTTP). No Node or REST API required.
 
-1. Get an **OAuth access token** for Notion MCP (see [Notion: Integrating your own MCP client](https://developers.notion.com/guides/mcp/build-mcp-client)).
-2. In Notion, create or pick a page that will contain the database and copy its page ID from the URL.
-3. In `.env` set:
-   - `NOTION_MCP_ACCESS_TOKEN` — OAuth access token for Notion MCP
-   - `NOTION_PARENT_PAGE_ID` — page ID where the “Research claims” database will be created
-4. Run:
+1. In Notion, create or pick a page that will contain the database and copy its page ID from the URL.
+2. Set `NOTION_PARENT_PAGE_ID` in `.env`.
+3. Run sync directly (single-command flow):
    ```bash
    python sync_to_notion.py research_claims_effects-of-caffeine-on-sleep-quality.json
    ```
-   This creates a database named **Research claims** on that page and one page per claim.
+   If token is missing, the script auto-starts OAuth bootstrap, opens browser consent, and writes to `.env`:
+   - `NOTION_MCP_ACCESS_TOKEN`
+   - `NOTION_MCP_REFRESH_TOKEN`
+   - `NOTION_MCP_CLIENT_ID`
+4. (Optional) Bootstrap token separately:
+   ```bash
+   python get_notion_mcp_token.py
+   ```
+5. The sync creates a database named **Research claims** on that page and one page per claim.
+
+Notes:
+- You can refresh tokens non-interactively with:
+  ```bash
+  python get_notion_mcp_token.py --refresh-only
+  ```
+- `sync_to_notion.py` will also attempt refresh automatically if access token is missing but refresh credentials exist.
+- To disable auto OAuth bootstrap in sync: `python sync_to_notion.py ... --no-auto-auth`
 
 ### 3. Optional: fact-check existing Notion data
 

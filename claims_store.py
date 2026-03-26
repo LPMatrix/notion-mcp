@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-# Schema property names for Notion MCP (notion-create-database / notion-create-pages)
+# Schema property names for Notion MCP (SQL DDL columns + notion-create-pages SQLite values)
 PROP_CLAIM = "Claim"
 PROP_SOURCE_URL = "Source URL"
 PROP_SOURCE_SNIPPET = "Source Snippet"
