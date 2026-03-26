@@ -14,21 +14,28 @@ Multi-step research agent that produces **claims + sources + fact-check** as JSO
 1. **OpenRouter** — Get an API key at [OpenRouter](https://openrouter.ai/keys).
 2. **Tavily** — Get an API key at [Tavily](https://tavily.com) for web search.
 3. **Env**
-   ```bash
+  ```bash
    cp .env.example .env
    # Edit .env: OPENROUTER_API_KEY, TAVILY_API_KEY (required for pipeline).
    # For sync: NOTION_MCP_ACCESS_TOKEN, NOTION_PARENT_PAGE_ID (see Sync to Notion below).
-   ```
+  ```
 4. **Install**
-   ```bash
+  ```bash
    pip install -r requirements.txt
-   ```
+  ```
 
 ## Usage
 
-### 1. Run the pipeline (writes JSON)
+### 1. Run the pipeline
 
 ```bash
+# After the pipeline writes JSON: Markdown file + Notion page
+python main.py "Your topic" --report
+
+# From an existing claims file (no new research)
+python write_report.py research_claims_my-topic.json
+python write_report.py research_claims_my-topic.json --title "My report title"
+
 # Full pipeline: research → fact-check → write research_claims_<topic_slug>.json
 python main.py "Effects of caffeine on sleep quality"
 
@@ -43,44 +50,32 @@ python main.py "Your topic" --no-expand
 
 `--max-search` caps the **total** unique results fed into extraction after merging (default: 10).
 
-Output paths are fixed: `research_claims_<topic_slug>.json` for a new topic run, or `research_claims_updated.json` for `--fact-check-from`. The JSON may include **`topic_expansion`** (the brief + queries used). Each claim has: `claim`, `source_url`, `source_snippet`, `topic`, `confidence`, `contradiction`, `fact_check_notes`.
-
-### 2. Research report (Markdown + Notion page)
-
-With `--report`, the pipeline writes `research_report_<slug>.md` **and** publishes the same content as a **child page** under `NOTION_PARENT_PAGE_ID`. Requires `OPENROUTER_API_KEY` plus the same Notion MCP credentials as sync (`NOTION_MCP_ACCESS_TOKEN`, etc.).
-
-```bash
-# After the pipeline writes JSON: Markdown file + Notion page
-python main.py "Your topic" --report
-
-# From an existing claims file (no new research)
-python write_report.py research_claims_my-topic.json
-python write_report.py research_claims_my-topic.json --title "My report title"
-```
+Output paths are fixed: `research_claims_<topic_slug>.json` for a new topic run, or `research_claims_updated.json` for `--fact-check-from`. The JSON may include `**topic_expansion`** (the brief + queries used). Each claim has: `claim`, `source_url`, `source_snippet`, `topic`, `confidence`, `contradiction`, `fact_check_notes`.
 
 The Notion page body uses **Notion Markdown**; title defaults to `Research report: <topic>` (`--report-title` on `main.py`, `--title` on `write_report.py`).
 
-### 3. Sync to Notion
+### 2. Sync to Notion
 
 The `sync_to_notion.py` script uses the **Python MCP SDK** and connects to Notion’s hosted MCP at `https://mcp.notion.com/mcp` (Streamable HTTP). No Node or REST API required.
 
 1. In Notion, create or pick a page that will contain the database and copy its page ID from the URL.
 2. Set `NOTION_PARENT_PAGE_ID` in `.env`.
 3. Run sync directly (single-command flow):
-   ```bash
+  ```bash
    python sync_to_notion.py research_claims_effects-of-caffeine-on-sleep-quality.json
-   ```
+  ```
    If token is missing, the script auto-starts OAuth bootstrap, opens browser consent, and writes to `.env`:
-   - `NOTION_MCP_ACCESS_TOKEN`
-   - `NOTION_MCP_REFRESH_TOKEN`
-   - `NOTION_MCP_CLIENT_ID`
+  - `NOTION_MCP_ACCESS_TOKEN`
+  - `NOTION_MCP_REFRESH_TOKEN`
+  - `NOTION_MCP_CLIENT_ID`
 4. (Optional) Bootstrap token separately:
-   ```bash
+  ```bash
    python get_notion_mcp_token.py
-   ```
+  ```
 5. The sync creates a database named **Research claims** on that page and one page per claim.
 
 Notes:
+
 - You can refresh tokens non-interactively with:
   ```bash
   python get_notion_mcp_token.py --refresh-only
@@ -88,7 +83,7 @@ Notes:
 - `sync_to_notion.py` will also attempt refresh automatically if access token is missing but refresh credentials exist.
 - To disable auto OAuth bootstrap in sync: `python sync_to_notion.py ... --no-auto-auth`
 
-### 4. Optional: fact-check existing Notion data
+### 3. Optional: fact-check existing Notion data
 
 - Export or fetch the claim pages from Notion into a JSON file in the same shape (`topic` + `claims` with `claim`, `source_url`, `source_snippet`, `topic`).
 - Run: `python main.py --fact-check-from that_file.json` (writes `research_claims_updated.json`).
@@ -98,15 +93,17 @@ Notes:
 
 The sync script creates a database with these properties (they match the JSON):
 
-| Property         | Type      | Description                    |
-|------------------|-----------|--------------------------------|
-| Claim            | Title     | The assertion                 |
-| Source URL       | URL       | Link to source                 |
-| Source Snippet   | Rich text | Quote/snippet from source      |
-| Topic            | Rich text | Research topic / run label     |
+
+| Property         | Type      | Description                      |
+| ---------------- | --------- | -------------------------------- |
+| Claim            | Title     | The assertion                    |
+| Source URL       | URL       | Link to source                   |
+| Source Snippet   | Rich text | Quote/snippet from source        |
+| Topic            | Rich text | Research topic / run label       |
 | Confidence       | Select    | High / Medium / Low / Unverified |
-| Contradiction    | Checkbox  | Flagged as contradicted        |
-| Fact-check notes | Rich text | Adversarial assessment         |
+| Contradiction    | Checkbox  | Flagged as contradicted          |
+| Fact-check notes | Rich text | Adversarial assessment           |
+
 
 ## Flow
 
